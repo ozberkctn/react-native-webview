@@ -48,16 +48,42 @@ RCT_EXPORT_VIEW_PROPERTY(allowsBackForwardNavigationGestures, BOOL)
 RCT_EXPORT_VIEW_PROPERTY(incognito, BOOL)
 RCT_EXPORT_VIEW_PROPERTY(pagingEnabled, BOOL)
 RCT_EXPORT_VIEW_PROPERTY(userAgent, NSString)
-RCT_EXPORT_VIEW_PROPERTY(applicationNameForUserAgent, NSString)
 RCT_EXPORT_VIEW_PROPERTY(cacheEnabled, BOOL)
 RCT_EXPORT_VIEW_PROPERTY(allowsLinkPreview, BOOL)
+RCT_EXPORT_VIEW_PROPERTY(onHighlight, RCTDirectEventBlock)
+RCT_EXPORT_VIEW_PROPERTY(onShare, RCTDirectEventBlock)
+RCT_EXPORT_VIEW_PROPERTY(onUnHighlight, RCTDirectEventBlock)
 
 /**
  * Expose methods to enable messaging the webview.
  */
 RCT_EXPORT_VIEW_PROPERTY(messagingEnabled, BOOL)
 RCT_EXPORT_VIEW_PROPERTY(onMessage, RCTDirectEventBlock)
-RCT_EXPORT_VIEW_PROPERTY(onScroll, RCTDirectEventBlock)
+
+
+RCT_EXPORT_METHOD(unhighlight:(nonnull NSNumber *)reactTag withTop:(int)top  withLeft:(int)left)
+{
+    [self.bridge.uiManager addUIBlock:^(__unused RCTUIManager *uiManager, NSDictionary<NSNumber *, RNCWKWebView *> *viewRegistry) {
+        RNCWKWebView *view = viewRegistry[reactTag];
+        if (![view isKindOfClass:[RNCWKWebView class]]) {
+            RCTLogError(@"Invalid view returned from registry, expecting RNCWKWebView, got: %@", view);
+        } else {
+            [view unhighlight:top withLeft:left];
+        }
+    }];
+}
+
+RCT_EXPORT_METHOD(closeUnHighlightPopUp:(nonnull NSNumber *)reactTag)
+{
+    [self.bridge.uiManager addUIBlock:^(__unused RCTUIManager *uiManager, NSDictionary<NSNumber *, RNCWKWebView *> *viewRegistry) {
+        RNCWKWebView *view = viewRegistry[reactTag];
+        if (![view isKindOfClass:[RNCWKWebView class]]) {
+            RCTLogError(@"Invalid view returned from registry, expecting RNCWKWebView, got: %@", view);
+        } else {
+            [view closeUnHighlightPopUp];
+        }
+    }];
+}
 
 RCT_EXPORT_METHOD(postMessage:(nonnull NSNumber *)reactTag message:(NSString *)message)
 {
@@ -83,10 +109,6 @@ RCT_CUSTOM_VIEW_PROPERTY(scrollEnabled, BOOL, RNCWKWebView) {
   view.scrollEnabled = json == nil ? true : [RCTConvert BOOL: json];
 }
 
-RCT_CUSTOM_VIEW_PROPERTY(sharedCookiesEnabled, BOOL, RNCWKWebView) {
-    view.sharedCookiesEnabled = json == nil ? false : [RCTConvert BOOL: json];
-}
-
 RCT_CUSTOM_VIEW_PROPERTY(decelerationRate, CGFloat, RNCWKWebView) {
   view.decelerationRate = json == nil ? UIScrollViewDecelerationRateNormal : [RCTConvert CGFloat: json];
 }
@@ -101,10 +123,6 @@ RCT_CUSTOM_VIEW_PROPERTY(showsHorizontalScrollIndicator, BOOL, RNCWKWebView) {
 
 RCT_CUSTOM_VIEW_PROPERTY(showsVerticalScrollIndicator, BOOL, RNCWKWebView) {
   view.showsVerticalScrollIndicator = json == nil ? true : [RCTConvert BOOL: json];
-}
-
-RCT_CUSTOM_VIEW_PROPERTY(keyboardDisplayRequiresUserAction, BOOL, RNCWKWebView) {
-  view.keyboardDisplayRequiresUserAction = json == nil ? true : [RCTConvert BOOL: json];
 }
 
 RCT_EXPORT_METHOD(injectJavaScript:(nonnull NSNumber *)reactTag script:(NSString *)script)

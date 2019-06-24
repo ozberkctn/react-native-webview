@@ -34,21 +34,18 @@ static NSURLCredential* clientAuthenticationCredential;
 @property (nonatomic, copy) RCTDirectEventBlock onLoadingProgress;
 @property (nonatomic, copy) RCTDirectEventBlock onShouldStartLoadWithRequest;
 @property (nonatomic, copy) RCTDirectEventBlock onMessage;
-@property (nonatomic, copy) RCTDirectEventBlock onScroll;
+@property (nonatomic, copy) RCTDirectEventBlock onHighlight;
+@property (nonatomic, copy) RCTDirectEventBlock onShare;
+@property (nonatomic, copy) RCTDirectEventBlock onUnHighlight;
 @property (nonatomic, copy) WKWebView *webView;
 @end
+
+BOOL showRemoveMenuItem = false;
 
 @implementation RNCWKWebView
 {
   UIColor * _savedBackgroundColor;
   BOOL _savedHideKeyboardAccessoryView;
-  BOOL _savedKeyboardDisplayRequiresUserAction;
-  
-  // Workaround for StatusBar appearance bug for iOS 12
-  // https://github.com/react-native-community/react-native-webview/issues/62
-  BOOL _isFullScreenVideoOpen;
-  UIStatusBarStyle _savedStatusBarStyle;
-  BOOL _savedStatusBarHidden;
 }
 
 - (instancetype)initWithFrame:(CGRect)frame
@@ -62,14 +59,11 @@ static NSURLCredential* clientAuthenticationCredential;
     _directionalLockEnabled = YES;
     _automaticallyAdjustContentInsets = YES;
     _contentInset = UIEdgeInsetsZero;
-    _savedKeyboardDisplayRequiresUserAction = YES;
-    _savedStatusBarStyle = RCTSharedApplication().statusBarStyle;
-    _savedStatusBarHidden = RCTSharedApplication().statusBarHidden;
   }
 
+  // Workaround for a keyboard dismissal bug present in iOS 12
+  // https://openradar.appspot.com/radar?id=5018321736957952
   if (@available(iOS 12.0, *)) {
-    // Workaround for a keyboard dismissal bug present in iOS 12
-    // https://openradar.appspot.com/radar?id=5018321736957952
     [[NSNotificationCenter defaultCenter]
       addObserver:self
       selector:@selector(keyboardWillHide)
@@ -78,12 +72,8 @@ static NSURLCredential* clientAuthenticationCredential;
       addObserver:self
       selector:@selector(keyboardWillShow)
       name:UIKeyboardWillShowNotification object:nil];
-    
-    // Workaround for StatusBar appearance bug for iOS 12
-    // https://github.com/react-native-community/react-native-webview/issues/62
-    [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(toggleFullScreenVideoStatusBars) name:@"_MRMediaRemotePlayerSupportedCommandsDidChangeNotification" object:nil];
   }
-  
+
   return self;
 }
 
@@ -142,72 +132,6 @@ static NSURLCredential* clientAuthenticationCredential;
     wkWebViewConfig.mediaPlaybackRequiresUserAction = _mediaPlaybackRequiresUserAction;
 #endif
 
-    if (_applicationNameForUserAgent) {
-        wkWebViewConfig.applicationNameForUserAgent = [NSString stringWithFormat:@"%@ %@", wkWebViewConfig.applicationNameForUserAgent, _applicationNameForUserAgent];
-    }
-
-    if(_sharedCookiesEnabled) {
-      // More info to sending cookies with WKWebView
-      // https://stackoverflow.com/questions/26573137/can-i-set-the-cookies-to-be-used-by-a-wkwebview/26577303#26577303
-      if (@available(iOS 11.0, *)) {
-        // Set Cookies in iOS 11 and above, initialize websiteDataStore before setting cookies
-        // See also https://forums.developer.apple.com/thread/97194
-        // check if websiteDataStore has not been initialized before
-        if(!_incognito && !_cacheEnabled) {
-          wkWebViewConfig.websiteDataStore = [WKWebsiteDataStore nonPersistentDataStore];
-        }
-        for (NSHTTPCookie *cookie in [[NSHTTPCookieStorage sharedHTTPCookieStorage] cookies]) {
-          [wkWebViewConfig.websiteDataStore.httpCookieStore setCookie:cookie completionHandler:nil];
-        }
-      } else {
-        NSMutableString *script = [NSMutableString string];
-
-        // Clear all existing cookies in a direct called function. This ensures that no
-        // javascript error will break the web content javascript.
-        // We keep this code here, if someone requires that Cookies are also removed within the
-        // the WebView and want to extends the current sharedCookiesEnabled option with an
-        // additional property.
-        // Generates JS: document.cookie = "key=; Expires=Thu, 01 Jan 1970 00:00:01 GMT;"
-        // for each cookie which is already available in the WebView context.
-        /*
-        [script appendString:@"(function () {\n"];
-        [script appendString:@"  var cookies = document.cookie.split('; ');\n"];
-        [script appendString:@"  for (var i = 0; i < cookies.length; i++) {\n"];
-        [script appendString:@"    if (cookies[i].indexOf('=') !== -1) {\n"];
-        [script appendString:@"      document.cookie = cookies[i].split('=')[0] + '=; Expires=Thu, 01 Jan 1970 00:00:01 GMT';\n"];
-        [script appendString:@"    }\n"];
-        [script appendString:@"  }\n"];
-        [script appendString:@"})();\n\n"];
-        */
-
-        // Set cookies in a direct called function. This ensures that no
-        // javascript error will break the web content javascript.
-          // Generates JS: document.cookie = "key=value; Path=/; Expires=Thu, 01 Jan 20xx 00:00:01 GMT;"
-        // for each cookie which is available in the application context.
-        [script appendString:@"(function () {\n"];
-        for (NSHTTPCookie *cookie in [[NSHTTPCookieStorage sharedHTTPCookieStorage] cookies]) {
-          [script appendFormat:@"document.cookie = %@ + '=' + %@",
-            RCTJSONStringify(cookie.name, NULL),
-            RCTJSONStringify(cookie.value, NULL)];
-          if (cookie.path) {
-            [script appendFormat:@" + '; Path=' + %@", RCTJSONStringify(cookie.path, NULL)];
-          }
-          if (cookie.expiresDate) {
-            [script appendFormat:@" + '; Expires=' + new Date(%f).toUTCString()",
-              cookie.expiresDate.timeIntervalSince1970 * 1000
-            ];
-          }
-          [script appendString:@";\n"];
-        }
-        [script appendString:@"})();\n"];
-
-        WKUserScript* cookieInScript = [[WKUserScript alloc] initWithSource:script
-                                                              injectionTime:WKUserScriptInjectionTimeAtDocumentStart
-                                                           forMainFrameOnly:YES];
-        [wkWebViewConfig.userContentController addUserScript:cookieInScript];
-      }
-    }
-
     _webView = [[WKWebView alloc] initWithFrame:self.bounds configuration: wkWebViewConfig];
     _webView.scrollView.delegate = self;
     _webView.UIDelegate = self;
@@ -233,8 +157,13 @@ static NSURLCredential* clientAuthenticationCredential;
 
     [self addSubview:_webView];
     [self setHideKeyboardAccessoryView: _savedHideKeyboardAccessoryView];
-    [self setKeyboardDisplayRequiresUserAction: _savedKeyboardDisplayRequiresUserAction];
     [self visitSource];
+      [self becomeFirstResponder];
+      UIMenuItem *customMenuItem1 = [[UIMenuItem alloc] initWithTitle:@"Altını Çiz" action:@selector(customAction1:)];
+      UIMenuItem *customMenuItem2 = [[UIMenuItem alloc] initWithTitle:@"Paylaş" action:@selector(customAction2:)];
+      UIMenuItem *customMenuItem3 = [[UIMenuItem alloc] initWithTitle:@"Kaldır" action:@selector(customAction3:)];
+      [[UIMenuController sharedMenuController] setMenuItems:[NSArray arrayWithObjects:customMenuItem1, customMenuItem2,customMenuItem3, nil]];
+      [[UIMenuController sharedMenuController] update];
   }
 }
 
@@ -256,24 +185,6 @@ static NSURLCredential* clientAuthenticationCredential;
     }
 
     [super removeFromSuperview];
-}
-
--(void)toggleFullScreenVideoStatusBars
-{
-#pragma clang diagnostic ignored "-Wdeprecated-declarations"
-  if (!_isFullScreenVideoOpen) {
-    _isFullScreenVideoOpen = YES;
-    RCTUnsafeExecuteOnMainQueueSync(^{
-      [RCTSharedApplication() setStatusBarStyle:UIStatusBarStyleLightContent animated:YES];
-    });
-  } else {
-    _isFullScreenVideoOpen = NO;
-    RCTUnsafeExecuteOnMainQueueSync(^{
-      [RCTSharedApplication() setStatusBarHidden:_savedStatusBarHidden animated:YES];
-      [RCTSharedApplication() setStatusBarStyle:_savedStatusBarStyle animated:YES];
-    });
-  }
-#pragma clang diagnostic pop
 }
 
 -(void)keyboardWillHide
@@ -370,94 +281,39 @@ static NSURLCredential* clientAuthenticationCredential;
 
 - (void)visitSource
 {
-    // Check for a static html source first
-    NSString *html = [RCTConvert NSString:_source[@"html"]];
-    if (html) {
-        NSURL *baseURL = [RCTConvert NSURL:_source[@"baseUrl"]];
-        if (!baseURL) {
-            baseURL = [NSURL URLWithString:@"about:blank"];
-        }
-        [_webView loadHTMLString:html baseURL:baseURL];
-        return;
+  // Check for a static html source first
+  NSString *html = [RCTConvert NSString:_source[@"html"]];
+  if (html) {
+    NSURL *baseURL = [RCTConvert NSURL:_source[@"baseUrl"]];
+    if (!baseURL) {
+      baseURL = [NSURL URLWithString:@"about:blank"];
     }
+//    [_webView loadHTMLString:html baseURL:baseURL];
+      [_webView loadHTMLString:html
+                       baseURL:[NSURL fileURLWithPath:[[NSBundle mainBundle] pathForResource:@"iPhone" ofType:@"css"]]];
+    return;
+  }
 
-    NSURLRequest *request = [self requestForSource:_source];
-    // Because of the way React works, as pages redirect, we actually end up
-    // passing the redirect urls back here, so we ignore them if trying to load
-    // the same url. We'll expose a call to 'reload' to allow a user to load
-    // the existing page.
-    if ([request.URL isEqual:_webView.URL]) {
-        return;
-    }
-    if (!request.URL) {
-        // Clear the webview
-        [_webView loadHTMLString:@"" baseURL:nil];
-        return;
-    }
-    if (request.URL.host) {
-        [_webView loadRequest:request];
-    }
-    else {
-        [_webView loadFileURL:request.URL allowingReadAccessToURL:request.URL];
-    }
-}
+  NSURLRequest *request = [RCTConvert NSURLRequest:_source];
+  // Because of the way React works, as pages redirect, we actually end up
+  // passing the redirect urls back here, so we ignore them if trying to load
+  // the same url. We'll expose a call to 'reload' to allow a user to load
+  // the existing page.
+  if ([request.URL isEqual:_webView.URL]) {
+    return;
+  }
+  if (!request.URL) {
+    // Clear the webview
+    [_webView loadHTMLString:@"" baseURL:nil];
+    return;
+  }
+  if (request.URL.host) {
+    [_webView loadRequest:request];
+  }
+  else {
+    [_webView loadFileURL:request.URL allowingReadAccessToURL:request.URL];
+  }
 
--(void)setKeyboardDisplayRequiresUserAction:(BOOL)keyboardDisplayRequiresUserAction
-{
-    if (_webView == nil) {
-        _savedKeyboardDisplayRequiresUserAction = keyboardDisplayRequiresUserAction;
-        return;
-    }
-  
-    if (_savedKeyboardDisplayRequiresUserAction == true) {
-        return;
-    }
-  
-    UIView* subview;
-  
-    for (UIView* view in _webView.scrollView.subviews) {
-        if([[view.class description] hasPrefix:@"WK"])
-            subview = view;
-    }
-  
-    if(subview == nil) return;
-  
-    Class class = subview.class;
-  
-    NSOperatingSystemVersion iOS_11_3_0 = (NSOperatingSystemVersion){11, 3, 0};
-    NSOperatingSystemVersion iOS_12_2_0 = (NSOperatingSystemVersion){12, 2, 0};
-
-    Method method;
-    IMP override;
-  
-    if ([[NSProcessInfo processInfo] isOperatingSystemAtLeastVersion: iOS_12_2_0]) {
-        // iOS 12.2.0 - Future
-        SEL selector = sel_getUid("_elementDidFocus:userIsInteracting:blurPreviousNode:changingActivityState:userObject:");
-        method = class_getInstanceMethod(class, selector);
-        IMP original = method_getImplementation(method);
-        override = imp_implementationWithBlock(^void(id me, void* arg0, BOOL arg1, BOOL arg2, BOOL arg3, id arg4) {
-            ((void (*)(id, SEL, void*, BOOL, BOOL, BOOL, id))original)(me, selector, arg0, TRUE, arg2, arg3, arg4);
-        });
-    }
-    else if ([[NSProcessInfo processInfo] isOperatingSystemAtLeastVersion: iOS_11_3_0]) {
-        // iOS 11.3.0 - 12.2.0
-        SEL selector = sel_getUid("_startAssistingNode:userIsInteracting:blurPreviousNode:changingActivityState:userObject:");
-        method = class_getInstanceMethod(class, selector);
-        IMP original = method_getImplementation(method);
-        override = imp_implementationWithBlock(^void(id me, void* arg0, BOOL arg1, BOOL arg2, BOOL arg3, id arg4) {
-            ((void (*)(id, SEL, void*, BOOL, BOOL, BOOL, id))original)(me, selector, arg0, TRUE, arg2, arg3, arg4);
-        });
-    } else {
-        // iOS 9.0 - 11.3.0
-        SEL selector = sel_getUid("_startAssistingNode:userIsInteracting:blurPreviousNode:userObject:");
-        method = class_getInstanceMethod(class, selector);
-        IMP original = method_getImplementation(method);
-        override = imp_implementationWithBlock(^void(id me, void* arg0, BOOL arg1, BOOL arg2, id arg3) {
-            ((void (*)(id, SEL, void*, BOOL, BOOL, id))original)(me, selector, arg0, TRUE, arg2, arg3);
-        });
-    }
-  
-    method_setImplementation(method, override);
 }
 
 -(void)setHideKeyboardAccessoryView:(BOOL)hideKeyboardAccessoryView
@@ -514,30 +370,6 @@ static NSURLCredential* clientAuthenticationCredential;
   if (!_scrollEnabled) {
     scrollView.bounds = _webView.bounds;
   }
-  else if (_onScroll != nil) {
-    NSDictionary *event = @{
-      @"contentOffset": @{
-          @"x": @(scrollView.contentOffset.x),
-          @"y": @(scrollView.contentOffset.y)
-          },
-      @"contentInset": @{
-          @"top": @(scrollView.contentInset.top),
-          @"left": @(scrollView.contentInset.left),
-          @"bottom": @(scrollView.contentInset.bottom),
-          @"right": @(scrollView.contentInset.right)
-          },
-      @"contentSize": @{
-          @"width": @(scrollView.contentSize.width),
-          @"height": @(scrollView.contentSize.height)
-          },
-      @"layoutMeasurement": @{
-          @"width": @(scrollView.frame.size.width),
-          @"height": @(scrollView.frame.size.height)
-          },
-      @"zoomScale": @(scrollView.zoomScale ?: 1),
-      };
-    _onScroll(event);
-  }
 }
 
 - (void)setDirectionalLockEnabled:(BOOL)directionalLockEnabled
@@ -574,14 +406,13 @@ static NSURLCredential* clientAuthenticationCredential;
 
   // Ensure webview takes the position and dimensions of RNCWKWebView
   _webView.frame = self.bounds;
-  _webView.scrollView.contentInset = _contentInset;
 }
 
 - (NSMutableDictionary<NSString *, id> *)baseEvent
 {
   NSDictionary *event = @{
     @"url": _webView.URL.absoluteString ?: @"",
-    @"title": _webView.title ?: @"",
+    @"title": _webView.title,
     @"loading" : @(_webView.loading),
     @"canGoBack": @(_webView.canGoBack),
     @"canGoForward" : @(_webView.canGoForward)
@@ -721,7 +552,6 @@ static NSURLCredential* clientAuthenticationCredential;
     NSMutableDictionary<NSString *, id> *event = [self baseEvent];
     [event addEntriesFromDictionary: @{
       @"url": (request.URL).absoluteString,
-      @"mainDocumentURL": (request.mainDocumentURL).absoluteString,
       @"navigationType": navigationTypes[@(navigationType)]
     }];
     if (![self.delegate webView:self
@@ -845,11 +675,11 @@ static NSURLCredential* clientAuthenticationCredential;
    * [_webView reload] doesn't reload the webpage. Therefore, we must
    * manually call [_webView loadRequest:request].
    */
-  NSURLRequest *request = [self requestForSource:self.source];
-
+  NSURLRequest *request = [RCTConvert NSURLRequest:self.source];
   if (request.URL && !_webView.URL.absoluteString.length) {
     [_webView loadRequest:request];
-  } else {
+  }
+  else {
     [_webView reload];
   }
 }
@@ -865,24 +695,71 @@ static NSURLCredential* clientAuthenticationCredential;
   _webView.scrollView.bounces = bounces;
 }
 
-- (NSURLRequest *)requestForSource:(id)json {
-  NSURLRequest *request = [RCTConvert NSURLRequest:self.source];
-
-  // If sharedCookiesEnabled we automatically add all application cookies to the
-  // http request. This is automatically done on iOS 11+ in the WebView constructor.
-  // Se we need to manually add these shared cookies here only for iOS versions < 11.
-  if (_sharedCookiesEnabled) {
-    if (@available(iOS 11.0, *)) {
-      // see WKWebView initialization for added cookies
-    } else {
-      NSArray *cookies = [[NSHTTPCookieStorage sharedHTTPCookieStorage] cookiesForURL:request.URL];
-      NSDictionary<NSString *, NSString *> *cookieHeader = [NSHTTPCookie requestHeaderFieldsWithCookies:cookies];
-      NSMutableURLRequest *mutableRequest = [request mutableCopy];
-      [mutableRequest setAllHTTPHeaderFields:cookieHeader];
-      return mutableRequest;
+- (BOOL)canPerformAction:(SEL)action withSender:(id)sender
+{
+    
+    if(showRemoveMenuItem && action == @selector(customAction3:)){
+        return YES;
     }
-  }
-  return request;
+    if (!showRemoveMenuItem && (action == @selector(customAction1:) || action == @selector(customAction2:)))
+    {
+        return YES;
+    }
+    
+    return NO;
+    
+}
+
+- (BOOL)canResignFirstResponder {
+    return NO;
+}
+
+- (BOOL)canBecomeFirstResponder {
+    return YES;
+}
+
+
+-(void)customAction1:(UIMenuItem*)item
+{
+        if (_onHighlight) {
+            NSMutableDictionary<NSString *, id> *event = [self baseEvent];
+            [event addEntriesFromDictionary:@{}];
+            _onHighlight(event);
+            [[UIMenuController sharedMenuController]
+             setMenuVisible:NO animated:NO];
+        }
+}
+-(void)customAction2:(UIMenuItem*)item
+{
+        if (_onShare) {
+            NSMutableDictionary<NSString *, id> *event = [self baseEvent];
+            [event addEntriesFromDictionary:@{}];
+            _onShare(event);
+        }
+}
+-(void)customAction3:(UIMenuItem*)item
+{
+    showRemoveMenuItem = NO;
+        if (_onUnHighlight) {
+            NSMutableDictionary<NSString *, id> *event = [self baseEvent];
+            [event addEntriesFromDictionary:@{}];
+            _onUnHighlight(event);
+        }
+}
+
+- (void)unhighlight:(int)top  withLeft:(int)left {
+    showRemoveMenuItem = YES;
+    CGRect targetRectangle = CGRectMake(left,top, 100, 100);
+    [[UIMenuController sharedMenuController] setTargetRect:targetRectangle
+                                                    inView:self];
+    [[UIMenuController sharedMenuController]
+     setMenuVisible:YES animated:YES];
+}
+
+- (void)closeUnHighlightPopUp{
+    showRemoveMenuItem = NO;
+    [[UIMenuController sharedMenuController]
+     setMenuVisible:NO animated:NO];
 }
 
 @end

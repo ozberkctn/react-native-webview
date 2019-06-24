@@ -57,5 +57,7 @@
 - (void)goBack;
 - (void)reload;
 - (void)stopLoading;
+- (void)unhighlight:(int)top  withLeft:(int)left;
+- (void)closeUnHighlightPopUp;
 
 @end

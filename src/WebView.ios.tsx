@@ -85,21 +85,21 @@ class WebView extends React.Component<IOSWebViewProps, State> {
     if (!this.props.useWebKit && !didWarnAboutUIWebViewUsage) {
       didWarnAboutUIWebViewUsage = true;
       console.warn(
-        'UIWebView is deprecated and will be removed soon, please use WKWebView (do not override useWebkit={true} prop),'
-          + ' more infos here: https://github.com/react-native-community/react-native-webview/issues/312',
+        'UIWebView is deprecated and will be removed soon, please use WKWebView (do not override useWebkit={true} prop),' +
+          ' more infos here: https://github.com/react-native-community/react-native-webview/issues/312',
       );
     }
     if (
-      this.props.useWebKit === true
-      && this.props.scalesPageToFit !== undefined
+      this.props.useWebKit === true &&
+      this.props.scalesPageToFit !== undefined
     ) {
       console.warn(
         'The scalesPageToFit property is not supported when useWebKit = true',
       );
     }
     if (
-      !this.props.useWebKit
-      && this.props.allowsBackForwardNavigationGestures
+      !this.props.useWebKit &&
+      this.props.allowsBackForwardNavigationGestures
     ) {
       console.warn(
         'The allowsBackForwardNavigationGestures property is not supported when useWebKit = false',
@@ -162,6 +162,14 @@ class WebView extends React.Component<IOSWebViewProps, State> {
       this.getCommands().stopLoading,
       null,
     );
+  };
+
+  closeUnHighlightPopUp = function() {
+    RNCWKWebViewManager.closeUnHighlightPopUp(this.getWebViewHandle());
+  };
+
+  unhighlight = function(top, left) {
+    RNCWKWebViewManager.unhighlight(this.getWebViewHandle(), top, left);
   };
 
   /**
